@@ -1,0 +1,72 @@
+{
+    "swagger": "2.0",
+    "basePath": "\/",
+    "paths": {
+        
+        "\/anonymizer\/es\/": {
+            "post": {
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    }
+                },
+                "summary": "To anonnymize a Spanish text",
+                "operationId": "post",
+                "parameters": [
+                    {
+                        "name": "payload",
+                        "required": true,
+                        "in": "body",
+                        "schema": {
+                           "$ref": "#\/definitions\/Texto"
+                        }
+                    }
+                ],
+                "tags": [
+                    "anonymizer"
+                ]
+            }
+        }
+    },
+    "info": {
+        "title": "Hcommonk anonymizer",
+        "version": "1.0",
+        "description": "Project to anonnymize entities"
+    },
+    "produces": [
+        "application\/json"
+    ],
+    "consumes": [
+        "application\/json"
+    ],
+    "tags": [
+        {
+           "name": "anonymizer",
+            "description": ""
+        }
+    ],
+    "definitions": {
+        "Texto": {
+            "required": [
+                "text"
+            ],
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text to be processed",
+                    "default": ""
+                }
+            },
+            "type": "object"
+        }
+    },
+    "responses": {
+        "ParseError": {
+            "description": "When a mask can't be parsed"
+        },
+        "MaskError": {
+            "description": "When any error occurs on mask"
+        }
+    }
+}
+      

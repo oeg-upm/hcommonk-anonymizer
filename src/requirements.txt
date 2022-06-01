@@ -1,0 +1,6 @@
+flask
+flask-restplus
+Werkzeug==0.16.1
+presidio_analyzer
+presidio_anonymizer
+
