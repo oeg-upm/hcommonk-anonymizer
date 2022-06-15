@@ -1,0 +1,38 @@
+{
+    "Contratos":{
+        "FounderIDNumber":[
+            0:"Mask"
+            1:"*"
+            2:8
+        ],
+        "FounderName":[
+            0:"None"
+        ],
+        "FounderIDNumber":[
+            0:"Hash"
+        ],
+        "FounderAddress":[
+            0:"Replace"
+            1:"<FOUNDERADDRESS>"
+        ],
+        "FounderCityName":[
+            0:"Random Replace"
+        ],
+        "FounderContribution":[
+            0:"Mask"
+            1:"*"
+            2:8
+        ],
+        "OtherContribution":[
+            0:"Encrypt"
+            1:"Et0TDZ1h1j1synHuxBNGuvemnCZorZpXCo6McQnSFhw="
+        ],
+        "CompanyAddress":[
+            0:"Replace"
+            1:"<COMPANYADDRESS>"
+        ],
+        "BusinessName":[
+            0:"None"
+        ]
+    }
+}
