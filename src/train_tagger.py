@@ -1,3 +1,6 @@
+# https://towardsdatascience.com/custom-named-entity-recognition-using-spacy-7140ebbb3718
+# https://towardsdatascience.com/train-ner-with-custom-training-data-using-spacy-525ce748fab7
+# https://www.machinelearningplus.com/nlp/training-custom-ner-model-in-spacy/
 import spacy
 import json
 import re
@@ -12,7 +15,7 @@ CONTRACTS_FOLDER = 'Datasets/400docs/'
 CONTRACTS_JSON = CONTRACTS_FOLDER+'contract.json'
 MODEL_PARAMS = {
     'n_iter': 100,
-    'output_dir': 'models/400docs/',
+    'output_dir': 'models/custom_spacy_models/400docs/',
     'new_model_name': 'nlp400docs',
     'dropout': 0.35,
     #'':,
