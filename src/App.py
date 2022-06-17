@@ -1,136 +1,199 @@
-# -*- coding: utf-8 -*-
 
-"""
-Created on Wed Mar 31 10:23:50 2021
-
-@author: Pablo
-"""
-
-
-'''
-
-
-!pip install flask
-
-!pip install flask-restplus
-
-
-!pip install Werkzeug==0.16.1
-
-
-'''
-
-import flask_restplus
-flask_restplus.__version__
-
+# IMPORTS
+# import spacy
+# import random
+from fastapi import FastAPI
 import json
-#from Service import NERModel
-from flask import Flask,request
-from flask_restplus import Api,Resource,fields
-from flask_swagger_ui import get_swaggerui_blueprint
-app = Flask(__name__)
-api = Api(app=app,version='1.0', title='Hcommonk-anonymizer', description='Project to anonymize')
+from typing import List
+from presidio_anonymizer import AnonymizerEngine
+from presidio_analyzer import AnalyzerEngine,EntityRecognizer, RecognizerResult
+from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts, NlpEngineProvider
+from presidio_anonymizer.entities.engine import OperatorConfig
+from faker import Faker
 
+################### GLOBALS ##################
+SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
 
-name_space = api.namespace('anonymizer', description='API to anonymize ')
-                   
+################### RECOGNIZERS ##################
 
+class Contracts_recognizer(EntityRecognizer):
+    """
+    Class that inherits from EntityRecognizer and is responsible of recognizing certain 
+    custom entities of the text (those that correspond to contracts).
+    """
+    expected_confidence_level = 0.7 # expected confidence level for this recognizer
+    def load(self) -> None:
+        """No loading is required."""
+        pass
 
+    def analyze(self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts) -> List[RecognizerResult]:
+        """
+        Logic for detecting a specific PII.
+        We are going to use the entities atribute since 
+        the spacy model that we are using has the capabilities to recognise those entities.
+        """
+        results = []
+        for ent in nlp_artifacts.entities:
+            results.append(
+                RecognizerResult(
+                    entity_type=ent.label_,
+                    start=nlp_artifacts.tokens[ent.start].idx,
+                    end=nlp_artifacts.tokens[ent.start].idx + len(ent.text),
+                    score=self.expected_confidence_level
+                )
+            )
+        return results
 
-SWAGGERUI_BLUEPRINT = get_swaggerui_blueprint(
-    '/swagger',
-    '/swagger.json',
-    config={
-        'app_name': "Valkyr-ie-bio"
-    }
-)
-app.register_blueprint(SWAGGERUI_BLUEPRINT,url_prefix='/swagger')
+def build_operators(actions_json, associations):
+    """
+    Function that builds a certain data structure containing instructions on how to operate 
+    with each type of entity. Some of these operations are : masking, substitution, encryption, hashing, etc.
+    """
+    fake = Faker('es_ES')
+    
+    operators = {}
+    for key,value in actions_json.items():
+        if value[0].lower() == 'mask':
+            operators[key] = OperatorConfig(operator_name="mask", params={'masking_char': value[1], 'chars_to_mask': value[2], 'from_end': False})
+        elif value[0].lower() == 'replace':
+            operators[key] = OperatorConfig(operator_name="replace", params={'new_value': value[1]})
+        elif value[0].lower() == 'encrypt':
+            operators[key] = OperatorConfig(operator_name="encrypt", params={'key': value[1]})
+        elif value[0].lower() == 'hash':
+            alg = 'md5'
+            if len(value)>1:
+                if value[1].lower() in ['sha256', 'sha512', 'md5']:
+                    alg = value[1].lower()
+            operators[key] = OperatorConfig(operator_name="encrypt", params={'hash_type': alg})
+            #hash_types = ['sha256', 'sha512', 'md5']# what should we use? default sha256
+        elif value[0].lower() == 'random replace':
+            # figure out which fake random entity to replace
+            if 'city' in key.lower():
+                new_value = fake.city()
+            elif 'name' in key.lower():
+                new_value = fake.name()
+            else:
+                print(f'Error entity type not supported for replacement ({key}).')
+                exit()
+            operators[key] = OperatorConfig(operator_name="replace", params={'new_value': new_value})
+        elif value[0].lower() == 'none':
+            operators[key] = OperatorConfig("custom", {"lambda": lambda x: x})
+        else:
+            print(f'Operation {value} not supported. Check the action file for the entity type {key}')
+            operators[key] = OperatorConfig("custom", {"lambda": lambda x: x})
 
-Texto = api.model('Texto', {
-    'text': fields.String(required=True, description='Text to be processed', default=''),
-})
+    # Add default operator. If no operation then we leave the entity as it is.
+    operators['DEFAULT'] = operators[key] = OperatorConfig("custom", {"lambda": lambda x: x})
 
-
-
+    # Add the associations (for example the entity ES_NIF equals FounderIDNumber)
+    for key,value in associations.items():
+        if key in operators:
+            operators[value] = operators[key]
+    
+    return operators
 
 def create_es_anonymizer():
-    
-    from presidio_anonymizer import AnonymizerEngine
+    """ Function to create the anonymizer. """
     anonymizer = AnonymizerEngine()
     return anonymizer
     
-
-
-
-
-
-def create_es_analyzer():
+def create_es_analyzer(all_entities):
+    """ 
+    Function to create the analyzer. First load the custom spacy model, 
+    then create the Analyzer engine and finally add the custom recognizers to the registry of the Analyzer.
+    """
     # Create configuration containing engine name and models
     configuration = {
         "nlp_engine_name": "spacy",
-        "models": [{"lang_code": "es", "model_name": "es_core_news_sm"}],
-    }
-    
-    from presidio_analyzer import AnalyzerEngine
-    from presidio_analyzer.nlp_engine import NlpEngineProvider
+        "models": [{"lang_code": "es", "model_name": SPACY_MODEL_PATH}],
+    }    
     # Create NLP engine based on configuration
     provider = NlpEngineProvider(nlp_configuration=configuration)
     nlp_engine = provider.create_engine()
     # the languages are needed to load country-specific recognizers 
     # for finding phones, passport numbers, etc.
     analyzer = AnalyzerEngine(nlp_engine=nlp_engine,supported_languages=["es"])
+    contracts_recognizer = Contracts_recognizer(supported_entities=all_entities, supported_language= 'es')
+    analyzer.registry.add_recognizer(contracts_recognizer)
+    #print(analyzer.get_supported_entities(language='es'))
     return analyzer
 
-es_analyzer = create_es_analyzer()
-es_anonymizer= create_es_anonymizer()
+################### INIT ################
+# 0. Prepare all the supported entities. Including associations of previous (default) supported entites with the custom ones.
+all_entities = ['FounderName','FounderContribution','BusinessName','FounderIDNumber','FounderAddress','FounderCityName','AdminName','AdminType','OtherContribution','CompanyAddress']
+associations = {
+    'FounderIDNumber' : 'ES_NIF'
+}
+all_entities.extend(list(associations.values()))
+SUPPORTED_ENTITIES = list(set(all_entities))
 
-def generateBIOResponse(data,labels):
+# 1. Build custom operators (load default actions file per entity type)
+with open('src/actions.json') as json_file:
+    actions = json.load(json_file)
+CUSTOM_OPERATORS = build_operators(actions_json=actions['Contratos'], associations = associations)
 
-    #{'label':'O','word':'Hola'},{'label':'O','word':'Mundo'}
-    List=[]
+# 2. Input data (examples or default data)
 
-    for d,l in zip(data,labels):
-        e ={ 'word':d,'label':l }
-        List.append(e)
-    return List
+# 3. Create custom spanish analyzer and anonymizer. Anonymizer is built with custom recognizer (spacy retrained model)
+ES_ANALYZER = create_es_analyzer(SUPPORTED_ENTITIES)
+ES_ANONYMIZER= create_es_anonymizer()
+    
+#response = anonimizar_documento(text, es_analyzer, es_anonymizer, operators = custom_operators, wanted_entities = all_entities)
 
+################### API STUFF ####################
+description = f"""
+This script is responsible for detecting certain types of entities in the input text document, which are about contracts. 
+Once the entities are recognized, they are processed according to their type.
+Some of them will be replaced by <ENTITYTYPE>, encrypted, masked with a certain character, etc. \n
 
+The loaded model supports and recognizes the following entities: {SUPPORTED_ENTITIES}. \n
 
+In the action dictionary, for each type of entity the user should specify a list of instructions to be applied to anonymize that entity. 
+The first element of the list indicates the type of operation, the possible operations together with the arguments to be included are: \n
+- mask (1: character, 2: mask length), \n
+- replace (1: new value), \n 
+- encrypt (1: key), \n 
+- hash (1: hash_type (sha256, sha512 or md5 (default)), \n
+- random replace, \n
+- none. \n
+If there are no instructions in the action dictionary for a given entity, the "none" operation will be applied. Check the default value.
+"""
+tags_metadata = [{
+        "name": "anonimizar_documento",
+        "description": f"Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations."
+    }]
 
+hcommonk_anonymizer = FastAPI(
+    title = "Hcommonk-Anonymizer",
+    description = description,
+    openapi_tags = tags_metadata
+)
 
-@name_space.route("/es/")
-class NCIDIST(Resource):
+################### API F ################
+@hcommonk_anonymizer.post("/anonimizar_documento", tags=["anonimizar_documento"])
+def anonimizar_documento(text: str, actions: dict = actions):
+    """
+    Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations.
+    The loaded model supports the following entities: {SUPPORTED_ENTITIES}
+    """
+    #custom_operators = build_operators(actions_json=actions['Contratos'], associations = associations)
+    annotations = ES_ANALYZER.analyze(text=text, language='es', entities=SUPPORTED_ENTITIES)
+    anonymized_text = ES_ANONYMIZER.anonymize(text=text, analyzer_results=annotations, operators=CUSTOM_OPERATORS).text
+    final_annotations = []
+    for annotation in annotations:
+        final_annotations.append({
+            'type': annotation.entity_type,
+            'start': annotation.start,
+            'end': annotation.end,
+            'surface_text': text[annotation.start:annotation.end],
+            #'score': annotation.score
+        })
+    
+    response= {
+        'text': anonymized_text,
+        'annotations': final_annotations
+        }
+    return response
 
-    @api.expect(Texto)
-    def post(self):
-        """
-        Anonymize a spanish text
-        """
-        data = request.json
-        text = data.get('text')
-        
-        results = es_analyzer.analyze(text=text, language='es')
-        from presidio_anonymizer.entities.engine import OperatorConfig
-        operators={
-           
-           "DEFAULT": OperatorConfig(operator_name="mask", params={ 
-                                              'masking_char': '*', 'chars_to_mask': 100, 'from_end': True})}
+#uvicorn src.Api:hcommonk_anonymizer --reload
 
-        anonymized_text = es_anonymizer.anonymize(text=text, analyzer_results=results, operators=operators).text
-
-
-        #TheSentence= ('Clustering of missense mutations in the ataxia-telangiectasia gene in a sporadic T-cell leukaemia')
-
-        
-        
-
-        response= {
-            'text': anonymized_text
-            }
-
-        return response
-
-
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0',port=8088)

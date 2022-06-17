@@ -123,9 +123,19 @@ def anonimizar_documento(text, es_analyzer, es_anonymizer, operators, wanted_ent
     """
     annotations = es_analyzer.analyze(text=text, language='es', entities=wanted_entities)
     anonymized_text = es_anonymizer.anonymize(text=text, analyzer_results=annotations, operators=operators).text
+    final_annotations = []
+    for annotation in annotations:
+        final_annotations.append({
+            'type': annotation.entity_type,
+            'start': annotation.start,
+            'end': annotation.end,
+            'surface_text': text[annotation.start:annotation.end],
+            #'score': annotation.score
+        })
+    
     response= {
         'text': anonymized_text,
-        'annotations': annotations
+        'annotations': final_annotations
         }
     return response
 
@@ -158,8 +168,8 @@ def main():
     # 5. Display results
     print(response['text'][:1000])
     print()
-    for res in response['annotations']:
-        print(res, text[res.start:res.end])
+    for annotation in response['annotations']:
+        print(annotation)
 
 if __name__ == '__main__':
     main()
