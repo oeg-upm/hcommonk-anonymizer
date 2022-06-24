@@ -165,6 +165,7 @@ tags_metadata = [{
 
 hcommonk_anonymizer = FastAPI(
     title = "Hcommonk-Anonymizer",
+    docs_url= "/__docs__",
     description = description,
     openapi_tags = tags_metadata
 )
@@ -195,5 +196,5 @@ def anonimizar_documento(text: str, actions: dict = actions):
         }
     return response
 
-#uvicorn src.Api:hcommonk_anonymizer --reload
-
+#uvicorn src.App:hcommonk_anonymizer --reload
+#uvicorn src.App:hcommonk_anonymizer --host 127.0.0.1 --port 8000

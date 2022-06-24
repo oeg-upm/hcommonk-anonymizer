@@ -129,4 +129,5 @@ dmypy.json
 .pyre/
 
 Datasets/
+models/spacy_models_cl
 #models/

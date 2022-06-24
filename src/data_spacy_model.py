@@ -1,3 +1,7 @@
+"""
+Script to format the data for a spacy model
+"""
+
 # https://towardsdatascience.com/custom-named-entity-recognition-using-spacy-7140ebbb3718
 # https://towardsdatascience.com/train-ner-with-custom-training-data-using-spacy-525ce748fab7
 # https://www.machinelearningplus.com/nlp/training-custom-ner-model-in-spacy/
@@ -8,27 +12,22 @@ import random
 from pathlib import Path
 from spacy.training.example import Example
 from spacy.util import minibatch, compounding
+from spacy.tokens import DocBin
+import warnings
 
 # Globals and hyperparameters
-#CONTRACTS_FOLDER = 'Datasets/50docs/'
-CONTRACTS_FOLDER = 'Datasets/50docs/'
+# 50docs or 400docs
+CONTRACTS_FOLDER = 'Datasets/400docs/'
 CONTRACTS_JSON = CONTRACTS_FOLDER+'contract.json'
-MODEL_PARAMS = {
-    'n_iter': 100,
-    'output_dir': 'models/custom_spacy_models/400docs/',
-    'new_model_name': 'nlp400docs',
-    'dropout': 0.35,
-    #'':,
-    #spacy.util.minibatch(train_data, size=spacy.util.compounding(4., 32., 1.001))
-}
+OUTPUT_PATH = 'Datasets/spacy_data/400docs/'
 
-print(f'Contracts_folder: {CONTRACTS_FOLDER}, MODEL_PARAMS: {MODEL_PARAMS}')
+print(f'Contracts_folder: {CONTRACTS_FOLDER}, output_folder: {OUTPUT_PATH}')
 input1 = input('Check if all correct, then press 1: ')
 if input1 != '1':
     print('Not pressed key 1, closing.')
     exit()
-# Class declaration of a single contract
 
+# Class declaration of a single contract
 class Contract:
     def __init__(self, contract_json):
         self.document_name = contract_json['document_name']
@@ -112,17 +111,6 @@ class Contract_annotation:
     def __hash__(self):
         return hash(self.text + str(self.char_start) + str(self.char_end))
 
-def build_annotations_dsict(contracts):
-    annotations_dict = {}
-
-    for contract in contracts:
-        for annotation in contract.annotations:
-            if annotation.label in annotations_dict:
-                annotations_dict[annotation.label].append(annotation.text)
-            else:
-                annotations_dict[annotation.label] = [annotation.text]
-    return annotations_dict
-
 def prepare_train_data_spacy(contracts):
     """
     TRAIN_DATA = [
@@ -136,64 +124,22 @@ def prepare_train_data_spacy(contracts):
         train_data.append((contract.document_content, {'entities' : entities}))
     return train_data
 
-def train_nermodel_spacy(train_data, labels, model='es_core_news_sm', params=MODEL_PARAMS):
-    n_iter = params['n_iter']
-    # Setting up the pipeline and entity recognizer.
-    if model is not None:
-        nlp = spacy.load(model)  # load existing spacy model
-        print("Loaded model '%s'" % model)
-    else:
-        nlp = spacy.blank('en')  # create blank Language class
-        print("Created blank 'en' model")
-    if 'ner' not in nlp.pipe_names:
-        ner = nlp.create_pipe('ner')
-        nlp.add_pipe(ner)
-    else:
-        ner = nlp.get_pipe('ner')
-
-    # Add new entity labels to entity recognizer
-    for i in labels:
-        ner.add_label(i)
-    # Inititalizing optimizer
-    if model is None:
-        optimizer = nlp.begin_training()
-    else:
-        #optimizer = nlp.entity.create_optimizer()
-        optimizer = nlp.get_pipe("ner").create_optimizer()
-
-    # Get names of other pipes to disable them during training to train # only NER and update the weights
-    other_pipes = [pipe for pipe in nlp.pipe_names if pipe != 'ner']
-    print('begin training')
-    # ADD TQM PROGRESS BAR OR SMTHNG
-    with nlp.disable_pipes(*other_pipes):  # only train NER
-        for itn in range(n_iter):
-            random.shuffle(train_data)
-            losses = {}
-            batches = minibatch(train_data, size=compounding(4., 32., 1.001))
-            for batch in batches:
-                texts, annotations = zip(*batch) 
-                # new
-                for text, annotations in batch:
-                    # create Example
-                    doc = nlp.make_doc(text)
-                    example = Example.from_dict(doc, annotations)
-                    # Update the model
-                    nlp.update([example], losses=losses, sgd=optimizer, drop=params['dropout'])
-                # Updating the weights
-                # nlp.update(texts, annotations, sgd=optimizer, drop=0.35, losses=losses)
-            print(f'Losses at it {itn}: {losses}')
-    
-    output_dir = params['output_dir']
-    new_model_name = params['new_model_name']
-    # Save model 
-    if output_dir is not None:
-        output_dir = Path(output_dir)
-    if not output_dir.exists():
-        output_dir.mkdir()
-    nlp.meta['name'] = new_model_name  # rename model
-    nlp.to_disk(output_dir)
-    print("Saved model to", output_dir)
-
+def convert(lang: str, training_data, output_path: Path):
+    nlp = spacy.blank(lang)
+    db = DocBin()
+    for text, annotations in training_data:
+        doc = nlp.make_doc(text)
+        ents = []
+        for start, end, label in annotations["entities"]:
+            span = doc.char_span(start, end, label=label)
+            if span is None:
+                msg = f"Skipping entity [{start}, {end}, {label}] in the following text because the character span '{doc.text[start:end]}' does not align with token boundaries:\n\n{repr(text)}\n"
+                warnings.warn(msg)
+            else:
+                ents.append(span)
+        doc.ents = ents
+        db.add(doc)
+    db.to_disk(output_path)
 
 def main():
     # 1. Load contrats json file
@@ -229,21 +175,26 @@ def main():
     #   2.3 extract all labels
     all_labels = list(set([annotation.label for contract in contracts for annotation in contract.annotations]))
 
-    # 3. Prepare the training data in spacy format
-    print(len(contracts))
-    print(list(set([contract.document_split for contract in contracts])))
+    # 3. Split data and prepare the training data in spacy format
     train_contracts = [contract for contract in contracts if contract.document_split == 'TRAINING']
     test_contracts = [contract for contract in contracts if contract.document_split == 'TEST']
     none_contracts = [contract for contract in contracts if contract.document_split == 'None']
     validation_contracts = [contract for contract in contracts if contract.document_split == 'VALIDATION']
     print(len(train_contracts), len(test_contracts), len(none_contracts), len(validation_contracts))
-    exit()
-    train_data = prepare_train_data_spacy(contracts)
-    
+    train_contracts.extend(none_contracts)
+    train_data = prepare_train_data_spacy(train_contracts)
+    test_data = prepare_train_data_spacy(test_contracts)
+    validation_data = prepare_train_data_spacy(validation_contracts)
+
     # 4.
-    model_nlp = train_nermodel_spacy(train_data, labels=all_labels, model='es_core_news_sm')
+    convert(lang = 'es', training_data = train_data, output_path = OUTPUT_PATH+'train.spacy')
+    convert(lang = 'es', training_data = test_data, output_path = OUTPUT_PATH+'test.spacy')
+    convert(lang = 'es', training_data = validation_data, output_path = OUTPUT_PATH+'validation.spacy')
 
     # 5.
     
 if __name__ == '__main__':
     main()
+
+# python -m spacy init fill-config .\Datasets\spacy_data\base_config.cfg .\Datasets\spacy_data\config.cfg
+# python -m spacy train .\Datasets\spacy_data\config.cfg --output ./models/spacy_models_cl/50docs/ --paths.train .\Datasets\spacy_data\50docs\train.spacy --paths.dev .\Datasets\spacy_data\50docs\validation.spacy
