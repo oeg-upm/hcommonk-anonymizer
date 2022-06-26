@@ -111,6 +111,39 @@ class Contract_annotation:
     def __hash__(self):
         return hash(self.text + str(self.char_start) + str(self.char_end))
 
+def complete_annotations(contracts):
+    for contract in contracts:
+        to_append = []
+        a_start_idxs = [annotation.start for annotation in contract.annotations]
+        text = contract.document_content
+        
+        for annotation in contract.annotations:
+            surface_text = annotation.text
+            occurrences_search = re.finditer(pattern=surface_text, string=text)
+            candidates_idxs = [index.start() for index in occurrences_search]
+            #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
+            candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
+            if(len(candidates_idxs) > 0):
+                #print(f'for {[surface_text, annotation.start, annotation.end]}: {[[text[idx:idx+len(surface_text)], idx, idx+len(surface_text)] for idx in candidates_idxs]}')
+                for idx in candidates_idxs:
+                    a_start_idxs.append(idx)
+                    to_append.append(
+                        Contract_annotation(contract.document_name, {
+                            'start': -1,
+                            'end': -1,
+                            'char_start': idx,
+                            'char_end': idx + len(surface_text),
+                            'label': annotation.label,
+                            'text': surface_text,
+                            'origin': 'null',
+                        })
+                    )
+                    
+        for ta in to_append:
+            contract.annotations.append(ta)
+        contract.annotations.sort(key=lambda x: x.char_start)
+    return contracts
+
 def prepare_train_data_spacy(contracts):
     """
     TRAIN_DATA = [
@@ -152,7 +185,8 @@ def main():
         contracts.append(Contract(document))
     #   2.1 clean data
     #[contract.clean_document_content() for contract in contracts]
-    
+    #   2.1 add unlabeled annotations
+    contracts = complete_annotations(contracts)
     #   2.2 remove collisions
     print(f'Total number of annotations before removing collisions: {sum([len(contract.annotations) for contract in contracts])}')
     for contract in contracts:

@@ -7,6 +7,7 @@ Some of them will be replaced by <ENTITYTYPE>, encrypted, masked with a certain 
 # import spacy
 # import random
 import json
+import re
 from typing import List
 from presidio_anonymizer import AnonymizerEngine
 from presidio_analyzer import AnalyzerEngine,EntityRecognizer, RecognizerResult
@@ -16,6 +17,63 @@ from faker import Faker
 
 ################### GLOBALS ##################
 SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
+CONTRACTS_FOLDER = 'Datasets/50docs/'
+################### TEMP TEST ################
+class Contract:
+    def __init__(self, contract_json):
+        self.document_name = contract_json['document_name']
+        self.document_uuid = contract_json['document_uuid']
+        #self.document_content = contract_json['document_content']
+        self.document_content = self.load_document_content(contract_json['document_content'])
+        self.extractions = contract_json['extractions']
+        self.extractions_tree = contract_json['extractions_tree']
+        self.document_split = contract_json['document_split']
+        #self.annotations = contract_json['annotations']
+        self.annotations = [Contract_annotation(self.document_name, annotation) for annotation in contract_json['annotations']]
+        self.annotations.sort(key=lambda x: x.char_start)
+        self.annotated_text = self.replace_text_with_annotations()
+    
+    def load_document_content(self, previous_content):
+        if previous_content == 'None' or previous_content == None:
+            document_path = CONTRACTS_FOLDER + self.document_uuid + '/text'
+            with open(document_path, 'r', encoding="utf8") as file:
+                document_content = file.read()
+            return document_content
+        else:
+            return previous_content
+    
+    def replace_text_with_annotations(self):
+        annotated_text = ''
+        last_pos = 0
+        for annotation in self.annotations:
+            annotated_text += self.document_content[last_pos:annotation.char_start]
+            annotated_text += f'<{annotation.label}>'
+            last_pos = annotation.char_end
+        annotated_text += self.document_content[last_pos:]
+        return annotated_text
+
+    
+# Class declaration of a single annotatio of a certain contract
+
+class Contract_annotation:
+    def __init__(self, document_name, annotation_json):
+        self.document_name = document_name
+        self.start = annotation_json['start']
+        self.end = annotation_json['end']
+        self.char_start = annotation_json['char_start']
+        self.char_end = annotation_json['char_end']
+        self.label = annotation_json['label']
+        if 'uuid' in annotation_json.keys():
+            self.uuid = annotation_json['uuid']
+        self.text = annotation_json['text']
+        self.origin = annotation_json['origin']
+
+    def __eq__(self, other):
+        return (isinstance(other, self.__class__) and
+            getattr(other, 'text', None) == self.text)
+
+    def __hash__(self):
+        return hash(self.text + str(self.char_start) + str(self.char_end))
 
 ################### RECOGNIZERS ##################
 
@@ -117,11 +175,40 @@ def create_es_analyzer(all_entities):
     #print(analyzer.get_supported_entities(language='es'))
     return analyzer
 
+def complete_annotations(text, annotations):
+    to_append = []
+    a_start_idxs = [annotation.start for annotation in annotations]
+
+    for annotation in annotations:
+        surface_text = text[annotation.start:annotation.end]
+        occurrences_search = re.finditer(pattern=surface_text, string=text)
+        candidates_idxs = [index.start() for index in occurrences_search]
+        #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
+        candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
+        if(len(candidates_idxs) > 0):
+            print(f'for {[surface_text, annotation.start, annotation.end]}: {[[text[idx:idx+len(surface_text)], idx, idx+len(surface_text)] for idx in candidates_idxs]}')
+            print()
+            for idx in candidates_idxs:
+                a_start_idxs.append(idx)
+                to_append.append(
+                    RecognizerResult(
+                        entity_type=annotation.entity_type,
+                        start=idx,
+                        end=idx + len(surface_text),
+                        score=annotation.score
+                    )
+                )
+    for ta in to_append:
+        annotations.append(ta)
+    return annotations
+
 def anonimizar_documento(text, es_analyzer, es_anonymizer, operators, wanted_entities):
     """
     Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations.
     """
     annotations = es_analyzer.analyze(text=text, language='es', entities=wanted_entities)
+    complete_annotations(text, annotations)
+    exit()
     anonymized_text = es_anonymizer.anonymize(text=text, analyzer_results=annotations, operators=operators).text
     final_annotations = []
     for annotation in annotations:
@@ -154,22 +241,41 @@ def main():
     custom_operators = build_operators(actions_json=actions['Contratos'], associations = associations)
     
     # 2. Input data
-    with open('Datasets/50docs/0b3cf9dc34e64045abed88c5d48b3b48/text', 'r', encoding='utf8') as file: 
-        text = file.read()
-    #text = "Hola soy Juan, trabajo en CemenPalma y mi número de teléfono es 678 987 635. Vivo en tenerife y soy católico y cobro 5 mil euros. pero me gasto cuatro en comida"
-    
+    with open('Datasets/50docs/contract.json') as json_file: 
+        contracts_json = json.load(json_file)
+    contracts = []
+    for document in contracts_json['documents']:
+        contracts.append(Contract(document))
     # 3. Create custom spanish analyzer and anonymizer. Anonymizer is built with custom recognizer (spacy retrained model)
     es_analyzer = create_es_analyzer(all_entities)
     es_anonymizer= create_es_anonymizer()
     
     # 4. Anonymize document
+    text = contracts[0].document_content
+
     response = anonimizar_documento(text, es_analyzer, es_anonymizer, operators = custom_operators, wanted_entities = all_entities)
 
+    """
+    for contract in contracts:
+        response = anonimizar_documento(contract.document_content, es_analyzer, es_anonymizer, operators = custom_operators, wanted_entities = all_entities)
+        predicted_annotations = [annotation['surface_text'] for annotation in response['annotations']]
+        distinct_ents = list(set(predicted_annotations))
+    
+        #for dent in distinct_ents:
+        for entit in distinct_ents:
+            text_occurrences = contract.document_content.count(entit)
+            predicted_occurrences = predicted_annotations.count(entit)
+            if text_occurrences != predicted_occurrences:
+                print(f'Entity: {entit} appears {text_occurrences} times in the text but only {predicted_occurrences} were predicted')
+                print()
+
+    
     # 5. Display results
     print(response['text'][:1000])
     print()
     for annotation in response['annotations']:
         print(annotation)
+    """
 
 if __name__ == '__main__':
     main()
