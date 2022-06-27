@@ -119,7 +119,7 @@ def complete_annotations(contracts):
         
         for annotation in contract.annotations:
             surface_text = annotation.text
-            occurrences_search = re.finditer(pattern=surface_text, string=text)
+            occurrences_search = re.finditer(pattern=re.escape(surface_text), string=text)
             candidates_idxs = [index.start() for index in occurrences_search]
             #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
             candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
@@ -142,6 +142,7 @@ def complete_annotations(contracts):
         for ta in to_append:
             contract.annotations.append(ta)
         contract.annotations.sort(key=lambda x: x.char_start)
+        
     return contracts
 
 def prepare_train_data_spacy(contracts):
@@ -166,8 +167,13 @@ def convert(lang: str, training_data, output_path: Path):
         for start, end, label in annotations["entities"]:
             span = doc.char_span(start, end, label=label)
             if span is None:
-                msg = f"Skipping entity [{start}, {end}, {label}] in the following text because the character span '{doc.text[start:end]}' does not align with token boundaries:\n\n{repr(text)}\n"
+                #msg = f"Skipping entity [{start}, {end}, {label}] in the following text because the character span '{doc.text[start:end]}' does not align with token boundaries:\n\n{repr(text)}\n"
+                msg = f"Skipping entity [{start}, {end}, {label}] in the following text because the character span '{doc.text[start:end]}' does not align with token boundaries. {text[start:end+5]}"
                 warnings.warn(msg)
+        	    # This usually happens when completing the annotations. E.g. the annotation is valencia but in the text is written valenciana.
+                # In those cases the entity is discarded. We could try filter out those entitys at the completing function.
+                # We could also work in a better tokenizer or preprocess the input text.
+                # Other examples: 'Albacete,' vs 'Albacete,-----' 'Administrador Único.' vs 'Administrador Único.-'
             else:
                 ents.append(span)
         doc.ents = ents
@@ -186,13 +192,17 @@ def main():
     #   2.1 clean data
     #[contract.clean_document_content() for contract in contracts]
     #   2.1 add unlabeled annotations
+    print(sum([len(contract.annotations) for contract in contracts]))
     contracts = complete_annotations(contracts)
+    print(sum([len(contract.annotations) for contract in contracts]))
+
     #   2.2 remove collisions
     print(f'Total number of annotations before removing collisions: {sum([len(contract.annotations) for contract in contracts])}')
     for contract in contracts:
         final_annotations = [contract.annotations[0]]
         for i in range(1,len(contract.annotations)):
-            previous_annotation = contract.annotations[i-1]
+            
+            previous_annotation = final_annotations[-1]
             current_annotation = contract.annotations[i]
             if current_annotation.char_start >= previous_annotation.char_end:
                 # no collision
@@ -201,6 +211,7 @@ def main():
                 # there is a collision, what should we do?
                 # currently we are removing it
                 pass
+        #final_annotations.sort(key=lambda x: x.char_start)
         contract.annotations = final_annotations
     print(f'Total number of annotations after removing collisions: {sum([len(contract.annotations) for contract in contracts])}')
 
