@@ -10,6 +10,7 @@ from presidio_analyzer import AnalyzerEngine,EntityRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts, NlpEngineProvider
 from presidio_anonymizer.entities.engine import OperatorConfig
 from faker import Faker
+import re
 
 ################### GLOBALS ##################
 SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
@@ -87,8 +88,8 @@ def build_operators(actions_json, associations):
 
     # Add the associations (for example the entity ES_NIF equals FounderIDNumber)
     for key,value in associations.items():
-        if key in operators:
-            operators[value] = operators[key]
+        if value in operators:
+            operators[key] = operators[value]
     
     return operators
 
@@ -118,19 +119,46 @@ def create_es_analyzer(all_entities):
     #print(analyzer.get_supported_entities(language='es'))
     return analyzer
 
+def complete_annotations(text, annotations):
+    to_append = []
+    a_start_idxs = [annotation.start for annotation in annotations]
+
+    for annotation in annotations:
+        surface_text = text[annotation.start:annotation.end]
+        occurrences_search = re.finditer(pattern=re.escape(surface_text), string=text)
+        candidates_idxs = [index.start() for index in occurrences_search]
+        #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
+        candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
+        if(len(candidates_idxs) > 0):
+            print(f'for {[surface_text, annotation.start, annotation.end]}: {[[text[idx:idx+len(surface_text)], idx, idx+len(surface_text)] for idx in candidates_idxs]}')
+            print()
+            for idx in candidates_idxs:
+                a_start_idxs.append(idx)
+                to_append.append(
+                    RecognizerResult(
+                        entity_type=annotation.entity_type,
+                        start=idx,
+                        end=idx + len(surface_text),
+                        score=annotation.score
+                    )
+                )
+    for ta in to_append:
+        annotations.append(ta)
+    return annotations
+
 ################### INIT ################
 # 0. Prepare all the supported entities. Including associations of previous (default) supported entites with the custom ones.
 all_entities = ['FounderName','FounderContribution','BusinessName','FounderIDNumber','FounderAddress','FounderCityName','AdminName','AdminType','OtherContribution','CompanyAddress']
-associations = {
-    'FounderIDNumber' : 'ES_NIF'
+ASSOCIATIONS = {
+    'ES_NIF' : 'FounderIDNumber'
 }
-all_entities.extend(list(associations.values()))
+all_entities.extend(list(ASSOCIATIONS.values()))
 SUPPORTED_ENTITIES = list(set(all_entities))
 
 # 1. Build custom operators (load default actions file per entity type)
 with open('src/actions.json') as json_file:
     actions = json.load(json_file)
-CUSTOM_OPERATORS = build_operators(actions_json=actions['Contratos'], associations = associations)
+CUSTOM_OPERATORS = build_operators(actions_json=actions['Contratos'], associations = ASSOCIATIONS)
 
 # 2. Input data (examples or default data)
 
@@ -179,9 +207,12 @@ def anonimizar_documento(text: str, actions: dict = actions):
     """
     #custom_operators = build_operators(actions_json=actions['Contratos'], associations = associations)
     annotations = ES_ANALYZER.analyze(text=text, language='es', entities=SUPPORTED_ENTITIES)
+    annotations = complete_annotations(text, annotations)
     anonymized_text = ES_ANONYMIZER.anonymize(text=text, analyzer_results=annotations, operators=CUSTOM_OPERATORS).text
     final_annotations = []
     for annotation in annotations:
+        if annotation.entity_type in ASSOCIATIONS:
+            annotation.entity_type = ASSOCIATIONS[annotation.entity_type]
         final_annotations.append({
             'type': annotation.entity_type,
             'start': annotation.start,
@@ -198,3 +229,4 @@ def anonimizar_documento(text: str, actions: dict = actions):
 
 #uvicorn src.App:hcommonk_anonymizer --reload
 #uvicorn src.App:hcommonk_anonymizer --host 127.0.0.1 --port 8000
+#python -m spacy train ./Datasets/spacy_data/config.cfg --output ./models/spacy_models_cl/400docs --paths.train ./Datasets/spacy_data/400docs/train.spacy --paths.dev ./Datasets/spacy_data/400docs/validation.spacy

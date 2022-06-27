@@ -181,7 +181,7 @@ def complete_annotations(text, annotations):
 
     for annotation in annotations:
         surface_text = text[annotation.start:annotation.end]
-        occurrences_search = re.finditer(pattern=surface_text, string=text)
+        occurrences_search = re.finditer(pattern=re.escape(surface_text), string=text)
         candidates_idxs = [index.start() for index in occurrences_search]
         #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
         candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
