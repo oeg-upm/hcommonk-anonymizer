@@ -8,9 +8,6 @@
         "FounderName":[
             "None"
         ],
-        "FounderIDNumber1":[
-            "Hash"
-        ],
         "FounderAddress":[
             "Replace",
             "<FOUNDERADDRESS>"

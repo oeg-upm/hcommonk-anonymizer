@@ -225,6 +225,12 @@ def anonimizar_documento(text: str = Body() , actions: dict = actions):
         }
     return response
 
+@hcommonk_anonymizer.post("/get_actions_dict", tags=["anonimizar_documento"])
+def get_actions_dict(text: str = None):
+    response= {
+        'actions': actions,
+    }
+    return response
 #uvicorn src.App:hcommonk_anonymizer --reload
 #uvicorn src.App:hcommonk_anonymizer --host 127.0.0.1 --port 8000
 #python -m spacy train ./Datasets/spacy_data/config.cfg --output ./models/spacy_models_cl/400docs --paths.train ./Datasets/spacy_data/400docs/train.spacy --paths.dev ./Datasets/spacy_data/400docs/validation.spacy
