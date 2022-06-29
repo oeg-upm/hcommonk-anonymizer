@@ -225,17 +225,17 @@ def anonimizar_documento(text: str = Body() , actions: dict = actions):
         }
     return response
 
-@hcommonk_anonymizer.post("/get_actions_dict", tags=["anonimizar_documento"])
-def get_actions_dict(text: str = None):
-    response= {
-        'actions': actions,
-    }
-    return response
-
 @hcommonk_anonymizer.post("/preparar_texto_swagger", tags=["anonimizar_documento"])
 def preparar_texto_swagger(text: str = None):
     response= {
         'text': text,
+    }
+    return response
+
+@hcommonk_anonymizer.post("/get_actions_dict", tags=["anonimizar_documento"])
+def get_actions_dict(text: str = None):
+    response= {
+        'actions': actions,
     }
     return response
 #uvicorn src.App:hcommonk_anonymizer --reload
