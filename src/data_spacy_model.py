@@ -158,6 +158,36 @@ def prepare_train_data_spacy(contracts):
         train_data.append((contract.document_content, {'entities' : entities}))
     return train_data
 
+def prepare_train_data_spacy_sents(contracts):
+    "WORK IN PORGRESS, the sentenizer must be better if we want to do this. A lot of annotations are missed"
+    """
+    TRAIN_DATA = [
+        ('Who is Nishanth?', {'entities': [(7, 15, 'PERSON')]}),
+        ('I like London and Berlin.', {'entities': [(7, 13, 'LOC'), (18, 24, 'LOC')]})
+    ]
+    """
+    # Load nlp sentenizer
+    nlp = spacy.load("es_core_news_sm")
+    # define result object
+    train_data = []
+
+    for contract in contracts:
+
+        # run the text trought the sentenizer
+        doc = nlp(contract.document_content)
+        sentences = [sentences for sentences in doc.sents]
+        
+        for sentence in sentences:
+            start_sent = sentence[0].idx
+            end_sent = sentence[-1].idx
+            sentence_annotations = [annotation for annotation in contract.annotations if start_sent <= annotation.char_start and end_sent >= annotation.char_end]
+            if sentence_annotations:
+                entities = [(annotation.char_start, annotation.char_end, annotation.label) for annotation in sentence_annotations]
+            else:
+                entities = []
+            train_data.append((sentence.text, {'entities' : entities}))
+    return train_data
+
 def convert(lang: str, training_data, output_path: Path):
     nlp = spacy.blank(lang)
     db = DocBin()
@@ -178,7 +208,7 @@ def convert(lang: str, training_data, output_path: Path):
                 ents.append(span)
         doc.ents = ents
         db.add(doc)
-    db.to_disk(output_path)
+    #db.to_disk(output_path)
 
 def main():
     # 1. Load contrats json file
@@ -231,6 +261,8 @@ def main():
     test_data = prepare_train_data_spacy(test_contracts)
     validation_data = prepare_train_data_spacy(validation_contracts)
 
+    for text, annotations in train_data:
+        print(text,annotations)
     # 4.
     convert(lang = 'es', training_data = train_data, output_path = OUTPUT_PATH+'train.spacy')
     convert(lang = 'es', training_data = test_data, output_path = OUTPUT_PATH+'test.spacy')

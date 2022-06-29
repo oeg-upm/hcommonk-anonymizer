@@ -2,7 +2,7 @@
 # IMPORTS
 # import spacy
 # import random
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 import json
 from typing import List
 from presidio_anonymizer import AnonymizerEngine
@@ -130,8 +130,6 @@ def complete_annotations(text, annotations):
         #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
         candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
         if(len(candidates_idxs) > 0):
-            print(f'for {[surface_text, annotation.start, annotation.end]}: {[[text[idx:idx+len(surface_text)], idx, idx+len(surface_text)] for idx in candidates_idxs]}')
-            print()
             for idx in candidates_idxs:
                 a_start_idxs.append(idx)
                 to_append.append(
@@ -200,15 +198,15 @@ hcommonk_anonymizer = FastAPI(
 
 ################### API F ################
 @hcommonk_anonymizer.post("/anonimizar_documento", tags=["anonimizar_documento"])
-def anonimizar_documento(text: str, actions: dict = actions):
+def anonimizar_documento(text: str = Body() , actions: dict = actions):
     """
     Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations.
     The loaded model supports the following entities: {SUPPORTED_ENTITIES}
     """
-    #custom_operators = build_operators(actions_json=actions['Contratos'], associations = associations)
+    custom_operators = build_operators(actions_json=actions['Contratos'], associations = ASSOCIATIONS)
     annotations = ES_ANALYZER.analyze(text=text, language='es', entities=SUPPORTED_ENTITIES)
     annotations = complete_annotations(text, annotations)
-    anonymized_text = ES_ANONYMIZER.anonymize(text=text, analyzer_results=annotations, operators=CUSTOM_OPERATORS).text
+    anonymized_text = ES_ANONYMIZER.anonymize(text=text, analyzer_results=annotations, operators=custom_operators).text
     final_annotations = []
     for annotation in annotations:
         if annotation.entity_type in ASSOCIATIONS:
