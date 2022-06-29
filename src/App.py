@@ -231,6 +231,13 @@ def get_actions_dict(text: str = None):
         'actions': actions,
     }
     return response
+
+@hcommonk_anonymizer.post("/preparar_texto_swagger", tags=["anonimizar_documento"])
+def preparar_texto_swagger(text: str = None):
+    response= {
+        'text': text,
+    }
+    return response
 #uvicorn src.App:hcommonk_anonymizer --reload
 #uvicorn src.App:hcommonk_anonymizer --host 127.0.0.1 --port 8000
 #python -m spacy train ./Datasets/spacy_data/config.cfg --output ./models/spacy_models_cl/400docs --paths.train ./Datasets/spacy_data/400docs/train.spacy --paths.dev ./Datasets/spacy_data/400docs/validation.spacy
