@@ -11,6 +11,7 @@ from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts, NlpEngine
 from presidio_anonymizer.entities.engine import OperatorConfig
 from faker import Faker
 import re
+import time
 
 ################### GLOBALS ##################
 SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
@@ -203,14 +204,19 @@ def anonimizar_documento(text: str = Body() , actions: dict = actions):
     Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations.
     The loaded model supports the following entities: {SUPPORTED_ENTITIES}
     """
+    start_time = time.time()
     custom_operators = build_operators(actions_json=actions['Contratos'], associations = ASSOCIATIONS)
     annotations = ES_ANALYZER.analyze(text=text, language='es', entities=SUPPORTED_ENTITIES)
+    model_annotations = len(annotations)
     annotations = complete_annotations(text, annotations)
+    extended_annotations =  len(annotations) - model_annotations
     anonymized_text = ES_ANONYMIZER.anonymize(text=text, analyzer_results=annotations, operators=custom_operators).text
     final_annotations = []
+    rule_annotations = 0
     for annotation in annotations:
         if annotation.entity_type in ASSOCIATIONS:
             annotation.entity_type = ASSOCIATIONS[annotation.entity_type]
+            rule_annotations += 1
         final_annotations.append({
             'type': annotation.entity_type,
             'start': annotation.start,
@@ -218,11 +224,31 @@ def anonimizar_documento(text: str = Body() , actions: dict = actions):
             'surface_text': text[annotation.start:annotation.end],
             #'score': annotation.score
         })
-    
+    final_annotations.sort(key=lambda x:x['start'])
+
+    end_time = time.time()
+    exec_time = end_time - start_time
+    annotations_type_counter = {}
+    for annotation in final_annotations:
+        if annotation['type'] in annotations_type_counter:
+            annotations_type_counter[annotation['type']] += 1
+        else:
+            annotations_type_counter[annotation['type']] = 1
+
+    metrics = {
+        'exec_time': round(exec_time,8),
+        'model_annotations': model_annotations,
+        'extended_annotations': extended_annotations,
+        'rule_annotations': rule_annotations,
+        'total_annotations': len(final_annotations),
+        'annotations_type_counter': annotations_type_counter
+    }
+
     response= {
         'text': anonymized_text,
-        'annotations': final_annotations
-        }
+        'annotations': final_annotations,
+        'metrics': metrics
+    }
     return response
 
 @hcommonk_anonymizer.post("/preparar_texto_swagger", tags=["anonimizar_documento"])

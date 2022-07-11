@@ -14,6 +14,7 @@ from presidio_analyzer import AnalyzerEngine,EntityRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts, NlpEngineProvider
 from presidio_anonymizer.entities.engine import OperatorConfig
 from faker import Faker
+import time
 
 ################### GLOBALS ##################
 SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
@@ -145,7 +146,7 @@ def build_operators(actions_json, associations):
     # Add the associations (for example the entity ES_NIF equals FounderIDNumber)
     for key,value in associations.items():
         if key in operators:
-            operators[value] = operators[key]
+            operators[key] = operators[value]
     
     return operators
 
@@ -186,8 +187,7 @@ def complete_annotations(text, annotations):
         #start_indexes.remove(annotation.start) if annotation.start in start_indexes else start_indexes
         candidates_idxs = [idx for idx in candidates_idxs if idx not in a_start_idxs]
         if(len(candidates_idxs) > 0):
-            print(f'for {[surface_text, annotation.start, annotation.end]}: {[[text[idx:idx+len(surface_text)], idx, idx+len(surface_text)] for idx in candidates_idxs]}')
-            print()
+            #print(f'for {[surface_text, annotation.start, annotation.end]}: {[[text[idx:idx+len(surface_text)], idx, idx+len(surface_text)] for idx in candidates_idxs]}')
             for idx in candidates_idxs:
                 a_start_idxs.append(idx)
                 to_append.append(
@@ -206,9 +206,11 @@ def anonimizar_documento(text, es_analyzer, es_anonymizer, operators, wanted_ent
     """
     Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations.
     """
+    start_time = time.time()
     annotations = es_analyzer.analyze(text=text, language='es', entities=wanted_entities)
+    model_annotations = len(annotations)
     complete_annotations(text, annotations)
-    exit()
+    extended_annotations =  len(annotations) - model_annotations
     anonymized_text = es_anonymizer.anonymize(text=text, analyzer_results=annotations, operators=operators).text
     final_annotations = []
     for annotation in annotations:
@@ -220,17 +222,36 @@ def anonimizar_documento(text, es_analyzer, es_anonymizer, operators, wanted_ent
             #'score': annotation.score
         })
     
+    end_time = time.time()
+    exec_time = end_time - start_time
+    annotations_counter = {}
+    for annotation in final_annotations:
+        if annotation['type'] in annotations_counter:
+            annotations_counter[annotation['type']] += 1
+        else:
+            annotations_counter[annotation['type']] = 1
+    
+    metrics = {
+        'exec_time': round(exec_time,6),
+        'exec_time_length': round(exec_time / len(text),6),
+        'model_annotations': model_annotations,
+        'extended_annotations': extended_annotations,
+        'total_annotations': len(final_annotations),
+        'annotations_counter': annotations_counter
+    }
+    # Build result object
     response= {
         'text': anonymized_text,
-        'annotations': final_annotations
-        }
+        'annotations': final_annotations,
+        'metrics': metrics
+    }
     return response
 
 def main():
     # 0. Prepare all the supported entities. Including associations of previous (default) supported entites with the custom ones.
     all_entities = ['FounderName','FounderContribution','BusinessName','FounderIDNumber','FounderAddress','FounderCityName','AdminName','AdminType','OtherContribution','CompanyAddress']
     associations = {
-        'FounderIDNumber' : 'ES_NIF'
+        'ES_NIF' : 'FounderIDNumber'
     }
     all_entities.extend(list(associations.values()))
     all_entities = list(set(all_entities))
@@ -251,10 +272,11 @@ def main():
     es_anonymizer= create_es_anonymizer()
     
     # 4. Anonymize document
-    text = contracts[0].document_content
-
+    text = contracts[6].document_content
     response = anonimizar_documento(text, es_analyzer, es_anonymizer, operators = custom_operators, wanted_entities = all_entities)
-
+    for val in response['annotations']:
+        print(val)
+    print(response['metrics'])
     """
     for contract in contracts:
         response = anonimizar_documento(contract.document_content, es_analyzer, es_anonymizer, operators = custom_operators, wanted_entities = all_entities)
@@ -305,3 +327,4 @@ def create_es_analyzer_old(all_entities):
     analyzer.registry.add_recognizer(contracts_recognizer)
     return analyzer
 """
+#"Et0TDZ1h1j1synHuxBNGuvemnCZorZpXCo6McQnSFhw="
