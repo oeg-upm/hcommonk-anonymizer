@@ -15,6 +15,7 @@ from presidio_analyzer.nlp_engine import SpacyNlpEngine, NlpArtifacts, NlpEngine
 from presidio_anonymizer.entities.engine import OperatorConfig
 from faker import Faker
 import time
+from cryptography.fernet import Fernet
 
 ################### GLOBALS ##################
 SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
@@ -120,7 +121,10 @@ def build_operators(actions_json, associations):
         elif value[0].lower() == 'replace':
             operators[key] = OperatorConfig(operator_name="replace", params={'new_value': value[1]})
         elif value[0].lower() == 'encrypt':
-            operators[key] = OperatorConfig(operator_name="encrypt", params={'key': value[1]})
+            # Declare encryption algorythm + custom Operator
+            encryption_algo = Fernet(value[1].encode("utf-8"))
+            operators[key] = OperatorConfig("custom", {"lambda": lambda x: str(encryption_algo.encrypt(x.encode("utf-8")))})
+            #operators[key] = OperatorConfig(operator_name="encrypt", params={'key': value[1]})
         elif value[0].lower() == 'hash':
             operators[key] = OperatorConfig(operator_name="encrypt", params={'hash_type': 'md5'})
             #hash_types = ['sha256', 'sha512', 'md5']# what should we use? default sha256
@@ -272,7 +276,8 @@ def main():
     es_anonymizer= create_es_anonymizer()
     
     # 4. Anonymize document
-    text = contracts[6].document_content
+    text = contracts[1].document_content
+    print(text)
     response = anonimizar_documento(text, es_analyzer, es_anonymizer, operators = custom_operators, wanted_entities = all_entities)
     for val in response['annotations']:
         print(val)

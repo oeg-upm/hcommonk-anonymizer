@@ -12,6 +12,7 @@ from presidio_anonymizer.entities.engine import OperatorConfig
 from faker import Faker
 import re
 import time
+from cryptography.fernet import Fernet
 
 ################### GLOBALS ##################
 SPACY_MODEL_PATH = "models/custom_spacy_models/400docs"
@@ -60,7 +61,10 @@ def build_operators(actions_json, associations):
         elif value[0].lower() == 'replace':
             operators[key] = OperatorConfig(operator_name="replace", params={'new_value': value[1]})
         elif value[0].lower() == 'encrypt':
-            operators[key] = OperatorConfig(operator_name="encrypt", params={'key': value[1]})
+            # Declare encryption algorythm + custom Operator
+            encryption_algo = Fernet(value[1].encode("utf-8"))
+            operators[key] = OperatorConfig("custom", {"lambda": lambda x: str(encryption_algo.encrypt(x.encode("utf-8")))})
+            #operators[key] = OperatorConfig(operator_name="encrypt", params={'key': value[1]})
         elif value[0].lower() == 'hash':
             alg = 'md5'
             if len(value)>1:
