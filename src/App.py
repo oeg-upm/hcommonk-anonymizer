@@ -89,7 +89,7 @@ def build_operators(actions_json, associations):
             operators[key] = OperatorConfig("custom", {"lambda": lambda x: x})
 
     # Add default operator. If no operation then we leave the entity as it is.
-    operators['DEFAULT'] = operators[key] = OperatorConfig("custom", {"lambda": lambda x: x})
+    operators['DEFAULT'] = OperatorConfig("custom", {"lambda": lambda x: x})
 
     # Add the associations (for example the entity ES_NIF equals FounderIDNumber)
     for key,value in associations.items():
