@@ -125,7 +125,7 @@ def create_es_analyzer(all_entities):
     return analyzer
 
 def complete_annotations(text, annotations):
-    to_append = []
+    extra_annotations = []
     a_start_idxs = [annotation.start for annotation in annotations]
 
     for annotation in annotations:
@@ -137,7 +137,7 @@ def complete_annotations(text, annotations):
         if(len(candidates_idxs) > 0):
             for idx in candidates_idxs:
                 a_start_idxs.append(idx)
-                to_append.append(
+                extra_annotations.append(
                     RecognizerResult(
                         entity_type=annotation.entity_type,
                         start=idx,
@@ -145,9 +145,8 @@ def complete_annotations(text, annotations):
                         score=annotation.score
                     )
                 )
-    for ta in to_append:
-        annotations.append(ta)
-    return annotations
+    return extra_annotations
+
 
 ################### INIT ################
 # 0. Prepare all the supported entities. Including associations of previous (default) supported entites with the custom ones.
@@ -208,19 +207,47 @@ def anonimizar_documento(text: str = Body() , actions: dict = actions):
     Anonymize a spanish text. Main pipeline. It will return the annonimized text as well as the annotations.
     The loaded model supports the following entities: {SUPPORTED_ENTITIES}
     """
+    # Store a list with the entities that are annonimized (those that appears in actions dict and dont have None as action)
+    types_to_keep = []
+    for key,value in actions['Contratos'].items():
+        if type(value) == list:
+            if len(value) > 0:
+                if value[0].lower() != 'none':
+                    types_to_keep.append(key)
+    #to_keep = [key for key, value in actions['Contratos'].items() if type(value) == list ]
+
+    # Measure run time
     start_time = time.time()
+
+    # Build operators and run analyzer
     custom_operators = build_operators(actions_json=actions['Contratos'], associations = ASSOCIATIONS)
     annotations = ES_ANALYZER.analyze(text=text, language='es', entities=SUPPORTED_ENTITIES)
+
+    # Count number of annotations produced by the model
     model_annotations = len(annotations)
-    annotations = complete_annotations(text, annotations)
-    extended_annotations =  len(annotations) - model_annotations
+    model_annotations_e = len([annotation for annotation in annotations if annotation.entity_type in types_to_keep])
+
+    # Complete annotations and count the number of annotations produced when completing
+    extra_annotations = complete_annotations(text, annotations)
+    annotations.extend(extra_annotations)
+    extended_annotations = len(extra_annotations)
+    extended_annotations_e = len([annotation for annotation in extra_annotations if annotation.entity_type in types_to_keep])
+
+    # Run annonimizer
     anonymized_text = ES_ANONYMIZER.anonymize(text=text, analyzer_results=annotations, operators=custom_operators).text
+
+    # Prepare annotatiosn result object
     final_annotations = []
     rule_annotations = 0
+    rule_annotations_e = 0
     for annotation in annotations:
+        # Swap type entities (ES_NIF -> FounderIDnumber) and count
         if annotation.entity_type in ASSOCIATIONS:
             annotation.entity_type = ASSOCIATIONS[annotation.entity_type]
             rule_annotations += 1
+            if annotation.entity_type in types_to_keep:
+                rule_annotations_e += 1
+
         final_annotations.append({
             'type': annotation.entity_type,
             'start': annotation.start,
@@ -230,24 +257,40 @@ def anonimizar_documento(text: str = Body() , actions: dict = actions):
         })
     final_annotations.sort(key=lambda x:x['start'])
 
+    # End measuring time
     end_time = time.time()
     exec_time = end_time - start_time
+
+    # Build a counter for the annotations types
     annotations_type_counter = {}
     for annotation in final_annotations:
         if annotation['type'] in annotations_type_counter:
             annotations_type_counter[annotation['type']] += 1
         else:
             annotations_type_counter[annotation['type']] = 1
+    # Build counter for the annotations types encrypted
+    annotations_type_counter_e = {key:value for key,value in annotations_type_counter.items() if key in types_to_keep}
 
+    # Build the metrics result object
     metrics = {
         'exec_time': round(exec_time,8),
-        'model_annotations': model_annotations,
-        'extended_annotations': extended_annotations,
-        'rule_annotations': rule_annotations,
-        'total_annotations': len(final_annotations),
-        'annotations_type_counter': annotations_type_counter
+        'annotated': {
+            'model_annotations': model_annotations,
+            'extended_annotations': extended_annotations,
+            'rule_annotations': rule_annotations,
+            'total_annotations': len(final_annotations),
+            'annotations_type_counter': annotations_type_counter
+        },
+        'encrypted': {
+            'model_annotations': model_annotations_e,
+            'extended_annotations': extended_annotations_e,
+            'rule_annotations': rule_annotations_e,
+            'total_annotations': len([annotation for annotation in final_annotations if annotation['type'] in types_to_keep]),
+            'annotations_type_counter': annotations_type_counter_e
+        }
     }
 
+    # Build final result object
     response= {
         'text': anonymized_text,
         'annotations': final_annotations,
